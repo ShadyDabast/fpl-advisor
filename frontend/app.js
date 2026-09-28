@@ -230,7 +230,7 @@ document.getElementById("transfer-advice-btn").addEventListener("click", async (
   resultEl.textContent = "Asking Gemini for advice...";
   try {
     const data = await apiPost("/advice/transfer", { position, max_price: maxPrice }, true);
-    resultEl.textContent = data.advice;
+    resultEl.textContent = `Gameweek ${data.gameweek}\n\n${data.advice}`;
   } catch (err) {
     resultEl.textContent = `Could not get advice: ${err.message}`;
   }
@@ -241,7 +241,7 @@ document.getElementById("captain-advice-btn").addEventListener("click", async ()
   resultEl.textContent = "Asking Gemini for advice...";
   try {
     const data = await apiGet("/advice/captain");
-    resultEl.textContent = data.advice;
+    resultEl.textContent = `Gameweek ${data.gameweek}\n\n${data.advice}`;
   } catch (err) {
     resultEl.textContent = `Could not get advice: ${err.message}`;
   }

@@ -87,6 +87,24 @@ class FPLClient:
                 return event["id"]
         raise FPLAPIError("Could not determine current gameweek.")
 
+    def get_next_gameweek(self) -> int:
+        """
+        The gameweek advice should target: the next one whose deadline hasn't passed.
+
+        FPL keeps a gameweek flagged `is_current` from its deadline until the NEXT
+        deadline, so `is_current` can be a gameweek that is already locked or finished.
+        Transfers/captain picks made now apply to `is_next`.
+        """
+        data = self._get("bootstrap-static/")
+        for event in data["events"]:
+            if event["is_next"]:
+                return event["id"]
+        # No next gameweek (end of season): fall back to the current one
+        for event in data["events"]:
+            if event["is_current"]:
+                return event["id"]
+        raise FPLAPIError("Could not determine the next gameweek.")
+
     def get_fixtures(self, gameweek: int | None = None) -> list[Fixture]:
         """Fetch fixtures, optionally filtered to a single gameweek."""
         data = self._get("fixtures/")
@@ -112,8 +130,9 @@ class FPLClient:
 if __name__ == "__main__":
     # Quick manual smoke test — run `python fpl_api.py` to sanity-check the client.
     client = FPLClient()
-    gw = client.get_current_gameweek()
-    print(f"Current gameweek: {gw}")
+    print(f"Current gameweek: {client.get_current_gameweek()}")
+    gw = client.get_next_gameweek()
+    print(f"Next gameweek (used for advice): {gw}")
 
     players = client.get_all_players()
     print(f"Fetched {len(players)} players")
