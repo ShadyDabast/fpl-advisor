@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from models import InvalidSquadError
 from fpl_api import FPLClient, FPLAPIError
-from ai_advisor import AIAdvisor, AIAdvisorError
+from ai_advisor import AIAdvisor, AIAdvisorError, AIRateLimitError
 import db
 import auth
 
@@ -185,7 +185,7 @@ def transfer_advice(req: TransferAdviceRequest, authorization: str = Header(defa
 
     try:
         all_players = client.get_all_players()
-        gw = client.get_current_gameweek()
+        gw = client.get_next_gameweek()
         fixtures = client.get_fixtures(gameweek=gw)
     except FPLAPIError as e:
         raise HTTPException(status_code=502, detail=f"FPL API error: {e}")
@@ -204,10 +204,12 @@ def transfer_advice(req: TransferAdviceRequest, authorization: str = Header(defa
 
     try:
         advice = advisor.get_transfer_advice(squad, candidates, fixtures, req.free_transfers)
+    except AIRateLimitError as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except AIAdvisorError as e:
         raise HTTPException(status_code=502, detail=f"AI advisor error: {e}")
 
-    return {"advice": advice, "candidates_considered": [p.__dict__ for p in candidates]}
+    return {"advice": advice, "gameweek": gw, "candidates_considered": [p.__dict__ for p in candidates]}
 
 
 @app.get("/api/advice/captain")
@@ -221,17 +223,19 @@ def captain_advice(authorization: str = Header(default="")):
         raise HTTPException(status_code=400, detail="Squad is empty")
 
     try:
-        gw = client.get_current_gameweek()
+        gw = client.get_next_gameweek()
         fixtures = client.get_fixtures(gameweek=gw)
     except FPLAPIError as e:
         raise HTTPException(status_code=502, detail=f"FPL API error: {e}")
 
     try:
         advice = advisor.get_captain_advice(squad, fixtures)
+    except AIRateLimitError as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except AIAdvisorError as e:
         raise HTTPException(status_code=502, detail=f"AI advisor error: {e}")
 
-    return {"advice": advice}
+    return {"advice": advice, "gameweek": gw}
 
 
 @app.get("/api/health")

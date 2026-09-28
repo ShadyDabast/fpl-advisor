@@ -11,6 +11,7 @@ and easy to swap models later if needed.
 """
 
 import os
+import time
 import google.generativeai as genai
 from models import Squad, Player, Fixture
 
@@ -20,6 +21,25 @@ MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")  # override with
 class AIAdvisorError(Exception):
     """Raised when the Gemini API can't be reached or returns something unusable."""
     pass
+
+
+class AIRateLimitError(AIAdvisorError):
+    """Raised when Gemini reports the usage quota has been exceeded (HTTP 429)."""
+    pass
+
+
+# Identical requests (same squad, candidates, fixtures) reuse the last answer for
+# this long instead of spending another API call. Free-tier quotas are small.
+CACHE_TTL_SECONDS = int(os.environ.get("GEMINI_CACHE_TTL_SECONDS", "3600"))
+
+
+def _looks_like_rate_limit(error: Exception) -> bool:
+    text = str(error).lower()
+    return (
+        "429" in text
+        or "quota" in text
+        or "resourceexhausted" in type(error).__name__.lower()
+    )
 
 
 class AIAdvisor:
@@ -32,6 +52,31 @@ class AIAdvisor:
             )
         genai.configure(api_key=key)
         self.model = genai.GenerativeModel(MODEL_NAME)
+        self._cache: dict[str, tuple[float, str]] = {}
+
+    def _generate(self, prompt: str) -> str:
+        """Send a prompt to Gemini, with caching and friendly quota errors."""
+        now = time.time()
+        cached = self._cache.get(prompt)
+        if cached and now - cached[0] < CACHE_TTL_SECONDS:
+            return cached[1]
+
+        try:
+            response = self.model.generate_content(prompt)
+        except Exception as e:
+            if _looks_like_rate_limit(e):
+                raise AIRateLimitError(
+                    "The AI advisor has reached its usage limit for now. "
+                    "Please try again in a few minutes, or later today if the daily limit is used up."
+                ) from e
+            raise AIAdvisorError(f"Gemini request failed: {e}") from e
+
+        if not response.text:
+            raise AIAdvisorError("Gemini returned an empty response.")
+
+        text = response.text.strip()
+        self._cache[prompt] = (now, text)
+        return text
 
     def _build_player_summary(self, player: Player, fixtures: list[Fixture]) -> str:
         """One line of stats + upcoming fixture difficulty for a player."""
@@ -78,14 +123,7 @@ transfer OUT and who to bring IN, and explain why in 2-3 sentences using the
 data above. If no transfer is worth it, say so and explain why. Keep the
 whole response under 150 words and avoid generic filler."""
 
-        try:
-            response = self.model.generate_content(prompt)
-        except Exception as e:
-            raise AIAdvisorError(f"Gemini request failed: {e}") from e
-
-        if not response.text:
-            raise AIAdvisorError("Gemini returned an empty response.")
-        return response.text.strip()
+        return self._generate(prompt)
 
     def get_captain_advice(self, squad: Squad, fixtures: list[Fixture]) -> str:
         """Recommend a captain and vice-captain from the current squad."""
@@ -101,14 +139,7 @@ vice-captain for the next gameweek from this squad only. Explain the choice
 in 2-3 sentences using the data above. Keep the whole response under 100
 words and avoid generic filler."""
 
-        try:
-            response = self.model.generate_content(prompt)
-        except Exception as e:
-            raise AIAdvisorError(f"Gemini request failed: {e}") from e
-
-        if not response.text:
-            raise AIAdvisorError("Gemini returned an empty response.")
-        return response.text.strip()
+        return self._generate(prompt)
 
 
 if __name__ == "__main__":
