@@ -14,7 +14,7 @@ import os
 import google.generativeai as genai
 from models import Squad, Player, Fixture
 
-MODEL_NAME = "gemini-1.5-flash"  # fast + cheap, good for this use case
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")  # override with the GEMINI_MODEL env var if Google renames/retires models again
 
 
 class AIAdvisorError(Exception):

@@ -7,12 +7,15 @@ Replaces storage.py's single-file JSON approach now that the app supports
 multiple users — each user needs their own saved squad.
 """
 
+import os
 import sqlite3
 import json
 from contextlib import contextmanager
 from models import Squad
 
-DB_PATH = "fpl_advisor.db"
+# On a host like Railway, set FPL_DB_PATH to a path on a mounted volume (e.g. /data/fpl_advisor.db)
+# so accounts and squads survive redeploys. Locally it defaults to a file next to the app.
+DB_PATH = os.environ.get("FPL_DB_PATH", "fpl_advisor.db")
 
 
 def init_db(db_path: str = DB_PATH) -> None:
