@@ -27,24 +27,39 @@ class FPLAPIError(Exception):
 
 
 class FPLClient:
-    def __init__(self, cache_ttl_seconds: int = 300):
+    def __init__(
+        self,
+        cache_ttl_seconds: int = 300,
+        max_retries: int = 1,
+        retry_delay_seconds: float = 2.0,
+    ):
         self._cache: dict = {}
         self._cache_time: dict = {}
         self.cache_ttl = cache_ttl_seconds
+        self.max_retries = max_retries            # extra attempts after the first
+        self.retry_delay = retry_delay_seconds
 
     def _get(self, endpoint: str) -> dict:
-        """Fetch a JSON endpoint, with simple time-based caching."""
+        """Fetch a JSON endpoint, with simple time-based caching and a retry on failure."""
         now = time.time()
         if endpoint in self._cache and (now - self._cache_time[endpoint]) < self.cache_ttl:
             return self._cache[endpoint]
 
-        try:
-            response = requests.get(f"{BASE_URL}/{endpoint}", timeout=10)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            raise FPLAPIError(f"Failed to fetch {endpoint}: {e}") from e
+        attempts = self.max_retries + 1
+        for attempt in range(1, attempts + 1):
+            try:
+                response = requests.get(f"{BASE_URL}/{endpoint}", timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                break
+            except (requests.exceptions.RequestException, ValueError) as e:
+                # ValueError covers a response body that isn't valid JSON
+                if attempt == attempts:
+                    raise FPLAPIError(
+                        f"Failed to fetch {endpoint} after {attempts} attempt(s): {e}"
+                    ) from e
+                time.sleep(self.retry_delay)
 
-        data = response.json()
         self._cache[endpoint] = data
         self._cache_time[endpoint] = now
         return data
