@@ -61,7 +61,13 @@ class AIAdvisor:
 
         try:
             print("DEBUG: Sending prompt to Gemini...", flush=True)
-            response = self.model.generate_content(prompt)
+            # Without an explicit timeout, a network problem between this
+            # server and Google leaves the request hanging indefinitely —
+            # the caller (and the browser) just sees a stuck "loading"
+            # state with no error. 25s fails fast with a catchable error.
+            response = self.model.generate_content(
+                prompt, request_options={"timeout": 25}
+            )
             print("DEBUG: Gemini response received.", flush=True)
         except Exception as e:
             if _looks_like_rate_limit(e):
