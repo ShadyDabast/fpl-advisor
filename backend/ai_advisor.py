@@ -55,19 +55,15 @@ class AIAdvisor:
         self._cache: dict[str, tuple[float, str]] = {}
 
     def _generate(self, prompt: str) -> str:
-    cached = self._cache.get(prompt)
-    if cached and time.time() - cached[0] < CACHE_TTL_SECONDS:
-        return cached[1]
+        cached = self._cache.get(prompt)
+        if cached and time.time() - cached[0] < CACHE_TTL_SECONDS:
+            return cached[1]
 
-    try:
-        print("DEBUG: Sending prompt to Gemini...", flush=True)
-
-        response = self.model.generate_content(prompt)
-
-        print("DEBUG: Gemini response received.", flush=True)
-
-    except Exception as e:
-        ...
+        try:
+            print("DEBUG: Sending prompt to Gemini...", flush=True)
+            response = self.model.generate_content(prompt)
+            print("DEBUG: Gemini response received.", flush=True)
+        except Exception as e:
             if _looks_like_rate_limit(e):
                 raise AIRateLimitError(
                     "The AI advisor has reached its usage limit for now. "
@@ -79,7 +75,7 @@ class AIAdvisor:
             raise AIAdvisorError("Gemini returned an empty response.")
 
         text = response.text.strip()
-        self._cache[prompt] = (now, text)
+        self._cache[prompt] = (time.time(), text)
         return text
 
     def _build_player_summary(self, player: Player, fixtures: list[Fixture]) -> str:
