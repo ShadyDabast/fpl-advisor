@@ -1,4 +1,4 @@
-﻿const API_BASE = "http://fpl-advisor-production-002b.up.railway.app/api"; 
+﻿const API_BASE = "https://fpl-advisor-production-002b.up.railway.app/api";
 
 let authToken = localStorage.getItem("fpl_token");
 let currentUsername = localStorage.getItem("fpl_username");
