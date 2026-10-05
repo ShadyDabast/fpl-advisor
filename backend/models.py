@@ -75,8 +75,9 @@ class Squad:
     REQUIRED_COUNTS = {"GK": 2, "DEF": 5, "MID": 5, "FWD": 3}
     MAX_PER_CLUB = 3
 
-    def __init__(self, budget: float = 100.0):
+    def __init__(self, budget: float = 100.0, mode: str = "BUILDING"):
         self.budget = budget
+        self.mode = mode
         self.players: list[Player] = []
 
     def add_player(self, player: Player) -> None:
@@ -94,7 +95,7 @@ class Squad:
         if club_count >= self.MAX_PER_CLUB:
             raise InvalidSquadError(f"Squad already has {self.MAX_PER_CLUB} players from {player.team}.")
 
-        if self.total_value() + player.price > self.budget:
+        if self.mode == "BUILDING" and self.total_value() + player.price > self.budget:
             raise InvalidSquadError(
                 f"Adding {player.name} (£{player.price}m) would exceed the "
                 f"£{self.budget}m budget."
@@ -128,12 +129,124 @@ class Squad:
     def to_dict(self) -> dict:
         return {
             "budget": self.budget,
+            "mode": self.mode,
             "players": [p.__dict__ for p in self.players],
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Squad":
-        squad = cls(budget=data.get("budget", 100.0))
+        squad = cls(budget=data.get("budget", 100.0), mode=data.get("mode", "BUILDING"))
         for p in data.get("players", []):
             squad.players.append(Player(**p))
         return squad
+
+    def refresh_stats_from(self, live_players: list["Player"]) -> None:
+        """
+        Update this squad's players with current form, total_points, and
+        ownership_percent from freshly-fetched live data (matched by
+        fpl_id), in place.
+
+        Needed because a squad's players are stored as a snapshot from
+        whenever they were added — without this, form/points/ownership
+        silently go stale as the season progresses, even though the
+        squad itself (who's in it) hasn't changed.
+
+        price, name, team, and position are deliberately left untouched:
+        price especially must not be silently updated, since the squad's
+        budget validity was checked against the price at the time each
+        player was added.
+
+        Players not found in live_players (e.g. a stale/retired id) are
+        left as-is rather than removed.
+        """
+        live_by_id = {p.fpl_id: p for p in live_players}
+        for player in self.players:
+            live = live_by_id.get(player.fpl_id)
+            if live is not None:
+                player.form = live.form
+                player.total_points = live.total_points
+                player.ownership_percent = live.ownership_percent
+
+    def select_starting_xi(self) -> dict:
+        """
+        Pick a starting XI (11 players) and bench (4 players) from this
+        squad's 15 players, using real FPL formation rules:
+          - exactly 1 goalkeeper starts
+          - outfield: 3-5 DEF, 2-5 MID, 1-3 FWD, totalling 10 players
+
+        Selection is form-based: within each position, higher form starts
+        first. The 3 position minimums (3 DEF / 2 MID / 1 FWD) are filled
+        first, then the remaining 4 outfield spots go to whichever
+        remaining players (any position) have the highest form, without
+        breaking the max caps (5 DEF / 5 MID / 3 FWD).
+
+        Returns {"formation": "3-4-3", "starters": [...], "bench": [...]}
+        with starters/bench as lists of Player objects (GK first, then
+        DEF, MID, FWD, each sorted by form descending).
+
+        Raises InvalidSquadError if the squad doesn't have a valid 15
+        (2 GK / 5 DEF / 5 MID / 3 FWD) to choose from.
+        """
+        if not self.is_complete():
+            raise InvalidSquadError(
+                "Squad needs a full, valid 15 players (2 GK, 5 DEF, 5 MID, 3 FWD) "
+                "before a lineup can be selected."
+            )
+
+        gks = sorted(self.by_position("GK"), key=lambda p: p.form, reverse=True)
+        defs = sorted(self.by_position("DEF"), key=lambda p: p.form, reverse=True)
+        mids = sorted(self.by_position("MID"), key=lambda p: p.form, reverse=True)
+        fwds = sorted(self.by_position("FWD"), key=lambda p: p.form, reverse=True)
+
+        starting_gk = gks[0]
+        bench_gk = gks[1]
+
+        # Lock in the minimums first: top 3 DEF, top 2 MID, top 1 FWD
+        MIN_DEF, MIN_MID, MIN_FWD = 3, 2, 1
+        MAX_DEF, MAX_MID, MAX_FWD = 5, 5, 3
+
+        starting_def = defs[:MIN_DEF]
+        starting_mid = mids[:MIN_MID]
+        starting_fwd = fwds[:MIN_FWD]
+
+        remaining_def = defs[MIN_DEF:]
+        remaining_mid = mids[MIN_MID:]
+        remaining_fwd = fwds[MIN_FWD:]
+
+        # Fill the remaining 4 outfield spots from whichever leftover
+        # players (any position) have the highest form, respecting caps.
+        pool = (
+            [(p, "DEF") for p in remaining_def]
+            + [(p, "MID") for p in remaining_mid]
+            + [(p, "FWD") for p in remaining_fwd]
+        )
+        pool.sort(key=lambda item: item[0].form, reverse=True)
+
+        spots_left = 11 - 1 - len(starting_def) - len(starting_mid) - len(starting_fwd)
+        for player, pos in pool:
+            if spots_left <= 0:
+                break
+            if pos == "DEF" and len(starting_def) < MAX_DEF:
+                starting_def.append(player)
+                spots_left -= 1
+            elif pos == "MID" and len(starting_mid) < MAX_MID:
+                starting_mid.append(player)
+                spots_left -= 1
+            elif pos == "FWD" and len(starting_fwd) < MAX_FWD:
+                starting_fwd.append(player)
+                spots_left -= 1
+
+        starting_ids = {starting_gk.fpl_id} | {
+            p.fpl_id for p in starting_def + starting_mid + starting_fwd
+        }
+        bench_outfield = [p for p in self.players if p.fpl_id not in starting_ids and p.position != "GK"]
+        bench_outfield.sort(key=lambda p: p.form, reverse=True)
+
+        formation = f"{len(starting_def)}-{len(starting_mid)}-{len(starting_fwd)}"
+
+        return {
+            "formation": formation,
+            "starters": [starting_gk] + starting_def + starting_mid + starting_fwd,
+            "bench": [bench_gk] + bench_outfield,
+        }
+

@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:8000/api"; // change to your deployed backend URL
+﻿const API_BASE = "http://localhost:8000/api"; // change to your deployed backend URL
 
 let authToken = localStorage.getItem("fpl_token");
 let currentUsername = localStorage.getItem("fpl_username");
@@ -125,6 +125,32 @@ function showAuthScreen() {
   userBar.classList.add("hidden");
 }
 
+// ---------- squad mode ----------
+
+const modeBuildingBtn = document.getElementById("mode-building");
+const modeCurrentBtn = document.getElementById("mode-current");
+const modeDisplay = document.getElementById("mode-display");
+
+function renderModeUI(mode) {
+  const isBuilding = mode === "BUILDING";
+  modeBuildingBtn.classList.toggle("active", isBuilding);
+  modeCurrentBtn.classList.toggle("active", !isBuilding);
+  modeDisplay.textContent = "Current mode: " + mode;
+}
+
+async function setSquadMode(mode) {
+  try {
+    const data = await apiPost("/squad/mode", { mode }, true);
+    renderModeUI(data.mode);
+    refreshSquad();
+  } catch (err) {
+    alert("Could not switch squad mode: " + err.message);
+  }
+}
+
+modeBuildingBtn.addEventListener("click", () => setSquadMode("BUILDING"));
+modeCurrentBtn.addEventListener("click", () => setSquadMode("CURRENT"));
+
 // ---------- squad ----------
 
 async function refreshSquad() {
@@ -135,6 +161,7 @@ async function refreshSquad() {
 
   try {
     const data = await apiGet("/squad");
+    renderModeUI(data.mode);
     statsEl.textContent =
       `${data.players.length}/15 players — £${data.total_value}m used, ` +
       `£${data.remaining_budget}m remaining` +
@@ -142,21 +169,61 @@ async function refreshSquad() {
 
     if (data.players.length === 0) {
       listEl.innerHTML = "<p>No players yet — search below to add some.</p>";
-      return;
+    } else {
+      data.players.forEach((p) => {
+        const row = document.createElement("div");
+        row.className = "player-row";
+        row.innerHTML = `
+          <span>${p.name} — ${p.team} (${p.position}) — £${p.price}m, form ${p.form}</span>
+          <button data-id="${p.fpl_id}">Remove</button>
+        `;
+        row.querySelector("button").addEventListener("click", () => removePlayer(p.fpl_id));
+        listEl.appendChild(row);
+      });
     }
 
-    data.players.forEach((p) => {
-      const row = document.createElement("div");
-      row.className = "player-row";
-      row.innerHTML = `
-        <span>${p.name} — ${p.team} (${p.position}) — £${p.price}m, form ${p.form}</span>
-        <button data-id="${p.fpl_id}">Remove</button>
-      `;
-      row.querySelector("button").addEventListener("click", () => removePlayer(p.fpl_id));
-      listEl.appendChild(row);
-    });
+    refreshLineup(data.is_complete);
   } catch (err) {
     statsEl.textContent = `Could not load squad: ${err.message}`;
+  }
+}
+
+function chipHtml(p) {
+  return `<div class="player-chip"><span class="chip-name">${p.name}</span><span class="chip-form">${p.position} · ${p.form}</span></div>`;
+}
+
+async function refreshLineup(squadIsComplete) {
+  const statusEl = document.getElementById("lineup-status");
+  const pitchEl = document.getElementById("pitch");
+  const benchEl = document.getElementById("bench");
+
+  if (!squadIsComplete) {
+    statusEl.textContent = "Fill your squad (15 players, valid formation) to see your starting lineup.";
+    pitchEl.hidden = true;
+    benchEl.hidden = true;
+    return;
+  }
+
+  statusEl.textContent = "Loading lineup...";
+  try {
+    const data = await apiGet("/squad/lineup");
+    statusEl.textContent = `Formation: ${data.formation}`;
+
+    const byPos = { GK: [], DEF: [], MID: [], FWD: [] };
+    data.starters.forEach((p) => byPos[p.position].push(p));
+
+    document.getElementById("row-gk").innerHTML = byPos.GK.map(chipHtml).join("");
+    document.getElementById("row-def").innerHTML = byPos.DEF.map(chipHtml).join("");
+    document.getElementById("row-mid").innerHTML = byPos.MID.map(chipHtml).join("");
+    document.getElementById("row-fwd").innerHTML = byPos.FWD.map(chipHtml).join("");
+    document.getElementById("bench-row").innerHTML = data.bench.map(chipHtml).join("");
+
+    pitchEl.hidden = false;
+    benchEl.hidden = false;
+  } catch (err) {
+    statusEl.textContent = `Could not load lineup: ${err.message}`;
+    pitchEl.hidden = true;
+    benchEl.hidden = true;
   }
 }
 

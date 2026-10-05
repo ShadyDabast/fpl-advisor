@@ -170,3 +170,73 @@ def test_load_missing_file_returns_empty_squad(tmp_path):
     squad = load_squad(str(path))
     assert squad.players == []
     assert squad.budget == 100.0
+
+# ---------- Squad Modes ----------
+
+
+def test_building_mode_enforces_budget():
+    squad = Squad(mode="BUILDING")
+    with pytest.raises(InvalidSquadError):
+        squad.add_player(Player(1, "Expensive", "Arsenal", "GK", 101.0, 5.0, 50, 10.0))
+    # Adding a cheap player within budget should succeed
+    squad.add_player(Player(2, "Cheap", "Chelsea", "DEF", 1.0, 5.0, 50, 10.0))
+    assert len(squad.players) == 1
+
+
+def test_current_mode_allows_over_budget():
+    squad = Squad(mode="CURRENT")
+    squad.add_player(Player(1, "Expensive", "Arsenal", "GK", 101.0, 5.0, 50, 10.0))
+    squad.add_player(Player(2, "Cheap", "Chelsea", "DEF", 1.0, 5.0, 50, 10.0))
+    assert len(squad.players) == 2
+    assert squad.total_value() == 102.0
+
+
+def test_both_modes_enforce_15_player_limit():
+    for mode in ("BUILDING", "CURRENT"):
+        squad = Squad(mode=mode, budget=1000.0)
+        positions = (["GK"] * 2) + (["DEF"] * 5) + (["MID"] * 5) + (["FWD"] * 3)
+        clubs = ["Arsenal", "Chelsea", "Liverpool", "Man City", "Spurs"]
+        for i, pos in enumerate(positions):
+            squad.add_player(Player(i, f"P{i}", clubs[i % len(clubs)], pos, 5.0, 5.0, 50, 10.0))
+        assert len(squad.players) == 15
+        with pytest.raises(InvalidSquadError):
+            squad.add_player(Player(99, "Extra", "Everton", "FWD", 4.0, 5.0, 50, 10.0))
+
+
+def test_both_modes_enforce_composition_rules():
+    for mode in ("BUILDING", "CURRENT"):
+        squad = Squad(mode=mode, budget=1000.0)
+        squad.add_player(Player(1, "GK1", "Arsenal", "GK", 5.0, 5.0, 50, 10.0))
+        squad.add_player(Player(2, "GK2", "Chelsea", "GK", 4.5, 5.0, 50, 10.0))
+        with pytest.raises(InvalidSquadError):
+            squad.add_player(Player(3, "GK3", "Liverpool", "GK", 4.0, 5.0, 50, 10.0))
+
+
+def test_both_modes_enforce_club_limit():
+    for mode in ("BUILDING", "CURRENT"):
+        squad = Squad(mode=mode, budget=1000.0)
+        for i in range(3):
+            squad.add_player(Player(i, f"Player{i}", "Arsenal", "MID", 5.0, 5.0, 50, 10.0))
+        with pytest.raises(InvalidSquadError):
+            squad.add_player(Player(99, "OneTooMany", "Arsenal", "DEF", 5.0, 5.0, 50, 10.0))
+
+
+def test_mode_persists_via_to_dict_from_dict():
+    squad = Squad(mode="CURRENT", budget=150.0)
+    squad.add_player(Player(1, "Test", "Arsenal", "GK", 5.0, 5.0, 50, 10.0))
+    data = squad.to_dict()
+    restored = Squad.from_dict(data)
+    assert restored.mode == "CURRENT"
+    assert restored.budget == 150.0
+    assert len(restored.players) == 1
+
+
+def test_current_mode_shows_market_value_not_budget_restriction():
+    squad = Squad(mode="CURRENT")
+    players = [Player(i, f"P{i}", f"Club{i%5}", pos, 10.0, 5.0, 50, 10.0)
+               for i, pos in enumerate(["GK"]*2 + ["DEF"]*5 + ["MID"]*5 + ["FWD"]*3)]
+    for p in players:
+        squad.add_player(p)
+    assert squad.total_value() == 150.0
+    assert squad.remaining_budget() == -50.0
+

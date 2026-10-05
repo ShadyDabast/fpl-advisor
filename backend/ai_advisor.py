@@ -15,7 +15,7 @@ import time
 import google.generativeai as genai
 from models import Squad, Player, Fixture
 
-MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")  # override with the GEMINI_MODEL env var if Google renames/retires models again
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")  # override with the GEMINI_MODEL env var if Google renames/retires models again
 
 
 class AIAdvisorError(Exception):
@@ -105,7 +105,26 @@ class AIAdvisor:
         candidate players to consider bringing in, and upcoming fixtures.
         """
         squad_summary = "\n".join(self._build_player_summary(p, fixtures) for p in squad.players)
-        candidate_summary = "\n".join(self._build_player_summary(p, fixtures) for p in candidates)
+
+        # --- Enforce max-3-players-per-club rule ---
+        # Count how many players from each club are already in the squad.
+        club_counts: dict[str, int] = {}
+        for p in squad.players:
+            club_counts[p.team] = club_counts.get(p.team, 0) + 1
+
+        # Filter out any candidate that would breach the rule if added.
+        # (We assume the manager will transfer out *some* player, but we cannot
+        # guarantee that the outgoing player is from the same club, so we err on
+        # the side of safety and exclude candidates that would create a 4th
+        # player from a club.)
+        allowed_candidates = [
+            c for c in candidates if club_counts.get(c.team, 0) < Squad.MAX_PER_CLUB
+        ]
+
+        # Build the candidate summary from the filtered list.
+        candidate_summary = "\n".join(
+            self._build_player_summary(p, fixtures) for p in allowed_candidates
+        )
 
         prompt = f"""You are an expert Fantasy Premier League (FPL) advisor.
 
@@ -116,6 +135,15 @@ Candidate players to consider bringing in:
 {candidate_summary}
 
 The manager has {free_transfers} free transfer(s) available this gameweek.
+
+The fixture list above covers the next three gameweeks (GW+1, GW+2, GW+3).
+Evaluate each player’s expected usefulness across the full 3-gameweek horizon,
+not just the next fixture. A difficult GW+1 followed by two good fixtures may
+make holding reasonable; an easy GW+1 followed by several difficult fixtures may
+limit the value of a short-term transfer. Consistently favourable fixtures across
+all 3 GWs strengthen the transfer case; consistently difficult fixtures strengthen
+the sell/avoid consideration. Also weigh player form, price, squad composition,
+and the manager’s transfer/budget constraints.
 
 Based on form, price, and upcoming fixture difficulty, recommend whether the
 manager should make a transfer this gameweek. If yes, say exactly who to

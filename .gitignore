@@ -1,2 +1,11 @@
 __pycache__/
 *.pyc
+.env
+*.db
+.pytest_cache/
+.pytest_tmp/
+models_*
+patch_*
+fix*.py
+check_*.py
+*.txt

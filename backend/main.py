@@ -141,6 +141,17 @@ def captain_advice_flow(squad: Squad, client: FPLClient, advisor: AIAdvisor) -> 
 def main() -> None:
     print("Loading squad...")
     squad = load_squad()
+    
+    # Show mode selection if new squad or user hasn't chosen
+    if not squad.players:
+        print("\nAre you building a new squad or entering your current squad?")
+        print("1. Build a new squad")
+        print("2. Enter my current squad")
+        choice = input("Choose (1/2): ").strip()
+        if choice == "2":
+            squad.mode = "CURRENT"
+        else:
+            squad.mode = "BUILDING" 
     client = FPLClient()
 
     # AI advisor needs an API key; don't crash the whole app if it's missing —

@@ -38,6 +38,31 @@
   </section>
 
   <main id="app-main" class="hidden">
+    <section class="panel" id="lineup-panel">
+      <h2>Starting Lineup</h2>
+      <div class="lineup-status" id="lineup-status"></div>
+      <div class="pitch" id="pitch" hidden>
+        <div class="pitch-row" id="row-fwd"></div>
+        <div class="pitch-row" id="row-mid"></div>
+        <div class="pitch-row" id="row-def"></div>
+        <div class="pitch-row" id="row-gk"></div>
+      </div>
+      <div class="bench" id="bench" hidden>
+        <span class="bench-label">Bench</span>
+        <div class="bench-row" id="bench-row"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="mode-panel">
+      <h2>Squad Mode</h2>
+      <div class="mode-selector">
+        <p>Are you building a new squad or entering your current squad?</p>
+        <button id="mode-building" class="mode-btn">Build a new squad</button>
+        <button id="mode-current" class="mode-btn">Enter my current squad</button>
+      </div>
+      <div id="mode-display" class="mode-display">Current mode: BUILDING</div>
+    </section>
+
     <section class="panel" id="squad-panel">
       <h2>Your Squad</h2>
       <div class="squad-stats" id="squad-stats">Loading squad...</div>

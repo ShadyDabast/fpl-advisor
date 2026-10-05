@@ -26,6 +26,15 @@ class FPLAPIError(Exception):
     pass
 
 
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+MAX_RETRIES = 2
+RETRY_BACKOFF_SECONDS = 1.0
+
+
+def _is_transient_status(status_code: int) -> bool:
+    return 500 <= status_code < 600
+
+
 class FPLClient:
     def __init__(self, cache_ttl_seconds: int = 300):
         self._cache: dict = {}
@@ -33,16 +42,37 @@ class FPLClient:
         self.cache_ttl = cache_ttl_seconds
 
     def _get(self, endpoint: str) -> dict:
-        """Fetch a JSON endpoint, with simple time-based caching."""
+        """Fetch a JSON endpoint, with simple time-based caching and retries."""
         now = time.time()
         if endpoint in self._cache and (now - self._cache_time[endpoint]) < self.cache_ttl:
             return self._cache[endpoint]
 
-        try:
-            response = requests.get(f"{BASE_URL}/{endpoint}", timeout=10)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            raise FPLAPIError(f"Failed to fetch {endpoint}: {e}") from e
+        last_error = None
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                response = requests.get(
+                    f"{BASE_URL}/{endpoint}",
+                    headers={"User-Agent": USER_AGENT},
+                    timeout=10,
+                )
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_BACKOFF_SECONDS)
+                    continue
+                raise FPLAPIError(f"Failed to fetch {endpoint} after {attempt + 1} attempts: {e}") from e
+
+            if response.ok:
+                break
+
+            last_error = FPLAPIError(f"Unexpected status {response.status_code} from {endpoint}")
+            if attempt < MAX_RETRIES and _is_transient_status(response.status_code):
+                time.sleep(RETRY_BACKOFF_SECONDS)
+                continue
+            raise last_error
+
+        if last_error is not None and not response.ok:
+            raise last_error
 
         data = response.json()
         self._cache[endpoint] = data

@@ -50,6 +50,10 @@ class AddPlayerRequest(BaseModel):
     name: str
 
 
+class SetSquadModeRequest(BaseModel):
+    mode: str
+
+
 class TransferAdviceRequest(BaseModel):
     position: str
     max_price: float
@@ -107,11 +111,40 @@ def login(req: LoginRequest):
 def squad_view(authorization: str = Header(default="")):
     user_id = get_current_user_id(authorization)
     squad = db.load_squad_for_user(user_id)
+
+    try:
+        squad.refresh_stats_from(client.get_all_players())
+    except FPLAPIError:
+        pass  # show stored stats rather than failing the whole page
+
     return {
+        "mode": squad.mode,
         "players": [p.__dict__ for p in squad.players],
         "total_value": squad.total_value(),
         "remaining_budget": squad.remaining_budget(),
         "is_complete": squad.is_complete(),
+    }
+
+
+@app.get("/api/squad/lineup")
+def squad_lineup(authorization: str = Header(default="")):
+    user_id = get_current_user_id(authorization)
+    squad = db.load_squad_for_user(user_id)
+
+    try:
+        squad.refresh_stats_from(client.get_all_players())
+    except FPLAPIError:
+        pass  # fall back to stored stats rather than failing the whole lineup
+
+    try:
+        lineup = squad.select_starting_xi()
+    except InvalidSquadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "formation": lineup["formation"],
+        "starters": [p.__dict__ for p in lineup["starters"]],
+        "bench": [p.__dict__ for p in lineup["bench"]],
     }
 
 
@@ -150,6 +183,17 @@ def remove_player(fpl_id: int, authorization: str = Header(default="")):
     return {"removed": removed.__dict__}
 
 
+@app.post("/api/squad/mode")
+def set_squad_mode(req: SetSquadModeRequest, authorization: str = Header(default="")):
+    user_id = get_current_user_id(authorization)
+    if req.mode not in ("BUILDING", "CURRENT"):
+        raise HTTPException(status_code=400, detail="Mode must be 'BUILDING' or 'CURRENT'")
+    squad = db.load_squad_for_user(user_id)
+    squad.mode = req.mode
+    db.save_squad_for_user(user_id, squad)
+    return {"mode": squad.mode}
+
+
 # ---------- player search ----------
 
 @app.get("/api/players/search")
@@ -186,9 +230,16 @@ def transfer_advice(req: TransferAdviceRequest, authorization: str = Header(defa
     try:
         all_players = client.get_all_players()
         gw = client.get_next_gameweek()
-        fixtures = client.get_fixtures(gameweek=gw)
+        # Gather fixtures for the next three gameweeks (gw, gw+1, gw+2)
+        all_fixtures = []
+        for offset in range(3):
+            gw_n = gw + offset
+            all_fixtures.extend(client.get_fixtures(gameweek=gw_n))
+        fixtures = all_fixtures
     except FPLAPIError as e:
         raise HTTPException(status_code=502, detail=f"FPL API error: {e}")
+
+    squad.refresh_stats_from(all_players)  # so advice is based on current form, not a stale snapshot
 
     squad_ids = {p.fpl_id for p in squad.players}
     candidates = sorted(
@@ -223,10 +274,13 @@ def captain_advice(authorization: str = Header(default="")):
         raise HTTPException(status_code=400, detail="Squad is empty")
 
     try:
+        all_players = client.get_all_players()
         gw = client.get_next_gameweek()
         fixtures = client.get_fixtures(gameweek=gw)
     except FPLAPIError as e:
         raise HTTPException(status_code=502, detail=f"FPL API error: {e}")
+
+    squad.refresh_stats_from(all_players)  # so advice is based on current form, not a stale snapshot
 
     try:
         advice = advisor.get_captain_advice(squad, fixtures)
