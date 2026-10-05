@@ -55,15 +55,19 @@ class AIAdvisor:
         self._cache: dict[str, tuple[float, str]] = {}
 
     def _generate(self, prompt: str) -> str:
-        """Send a prompt to Gemini, with caching and friendly quota errors."""
-        now = time.time()
-        cached = self._cache.get(prompt)
-        if cached and now - cached[0] < CACHE_TTL_SECONDS:
-            return cached[1]
+    cached = self._cache.get(prompt)
+    if cached and time.time() - cached[0] < CACHE_TTL_SECONDS:
+        return cached[1]
 
-        try:
-            response = self.model.generate_content(prompt)
-        except Exception as e:
+    try:
+        print("DEBUG: Sending prompt to Gemini...", flush=True)
+
+        response = self.model.generate_content(prompt)
+
+        print("DEBUG: Gemini response received.", flush=True)
+
+    except Exception as e:
+        ...
             if _looks_like_rate_limit(e):
                 raise AIRateLimitError(
                     "The AI advisor has reached its usage limit for now. "
