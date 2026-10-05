@@ -1,0 +1,322 @@
+warning: in the working copy of 'backend/app.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'backend/models.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/style.css', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/backend/__pycache__/ai_advisor.cpython-314.pyc b/backend/__pycache__/ai_advisor.cpython-314.pyc[m
+[1mindex 8363ee1..15ab9ad 100644[m
+Binary files a/backend/__pycache__/ai_advisor.cpython-314.pyc and b/backend/__pycache__/ai_advisor.cpython-314.pyc differ
+[1mdiff --git a/backend/__pycache__/app.cpython-314.pyc b/backend/__pycache__/app.cpython-314.pyc[m
+[1mindex cc86df7..12c2e5e 100644[m
+Binary files a/backend/__pycache__/app.cpython-314.pyc and b/backend/__pycache__/app.cpython-314.pyc differ
+[1mdiff --git a/backend/__pycache__/db.cpython-314.pyc b/backend/__pycache__/db.cpython-314.pyc[m
+[1mindex 3c92b9f..095d477 100644[m
+Binary files a/backend/__pycache__/db.cpython-314.pyc and b/backend/__pycache__/db.cpython-314.pyc differ
+[1mdiff --git a/backend/__pycache__/fpl_api.cpython-314.pyc b/backend/__pycache__/fpl_api.cpython-314.pyc[m
+[1mindex 55e7231..9f5937d 100644[m
+Binary files a/backend/__pycache__/fpl_api.cpython-314.pyc and b/backend/__pycache__/fpl_api.cpython-314.pyc differ
+[1mdiff --git a/backend/__pycache__/models.cpython-314.pyc b/backend/__pycache__/models.cpython-314.pyc[m
+[1mindex 987197e..10b095d 100644[m
+Binary files a/backend/__pycache__/models.cpython-314.pyc and b/backend/__pycache__/models.cpython-314.pyc differ
+[1mdiff --git a/backend/ai_advisor.py b/backend/ai_advisor.py[m
+[1mindex 3534e3c..8188457 100644[m
+[1m--- a/backend/ai_advisor.py[m
+[1m+++ b/backend/ai_advisor.py[m
+[36m@@ -15,7 +15,7 @@[m [mimport time[m
+ import google.generativeai as genai[m
+ from models import Squad, Player, Fixture[m
+ [m
+[31m-MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")  # override with the GEMINI_MODEL env var if Google renames/retires models again[m
+[32m+[m[32mMODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")  # override with the GEMINI_MODEL env var if Google renames/retires models again[m
+ [m
+ [m
+ class AIAdvisorError(Exception):[m
+[36m@@ -105,7 +105,26 @@[m [mclass AIAdvisor:[m
+         candidate players to consider bringing in, and upcoming fixtures.[m
+         """[m
+         squad_summary = "\n".join(self._build_player_summary(p, fixtures) for p in squad.players)[m
+[31m-        candidate_summary = "\n".join(self._build_player_summary(p, fixtures) for p in candidates)[m
+[32m+[m
+[32m+[m[32m        # --- Enforce max-3-players-per-club rule ---[m
+[32m+[m[32m        # Count how many players from each club are already in the squad.[m
+[32m+[m[32m        club_counts: dict[str, int] = {}[m
+[32m+[m[32m        for p in squad.players:[m
+[32m+[m[32m            club_counts[p.team] = club_counts.get(p.team, 0) + 1[m
+[32m+[m
+[32m+[m[32m        # Filter out any candidate that would breach the rule if added.[m
+[32m+[m[32m        # (We assume the manager will transfer out *some* player, but we cannot[m
+[32m+[m[32m        # guarantee that the outgoing player is from the same club, so we err on[m
+[32m+[m[32m        # the side of safety and exclude candidates that would create a 4th[m
+[32m+[m[32m        # player from a club.)[m
+[32m+[m[32m        allowed_candidates = [[m
+[32m+[m[32m            c for c in candidates if club_counts.get(c.team, 0) < Squad.MAX_PER_CLUB[m
+[32m+[m[32m        ][m
+[32m+[m
+[32m+[m[32m        # Build the candidate summary from the filtered list.[m
+[32m+[m[32m        candidate_summary = "\n".join([m
+[32m+[m[32m            self._build_player_summary(p, fixtures) for p in allowed_candidates[m
+[32m+[m[32m        )[m
+ [m
+         prompt = f"""You are an expert Fantasy Premier League (FPL) advisor.[m
+ [m
+[36m@@ -117,6 +136,15 @@[m [mCandidate players to consider bringing in:[m
+ [m
+ The manager has {free_transfers} free transfer(s) available this gameweek.[m
+ [m
+[32m+[m[32mThe fixture list above covers the next three gameweeks (GW+1, GW+2, GW+3).[m
+[32m+[m[32mEvaluate each player’s expected usefulness across the full 3-gameweek horizon,[m
+[32m+[m[32mnot just the next fixture. A difficult GW+1 followed by two good fixtures may[m
+[32m+[m[32mmake holding reasonable; an easy GW+1 followed by several difficult fixtures may[m
+[32m+[m[32mlimit the value of a short-term transfer. Consistently favourable fixtures across[m
+[32m+[m[32mall 3 GWs strengthen the transfer case; consistently difficult fixtures strengthen[m
+[32m+[m[32mthe sell/avoid consideration. Also weigh player form, price, squad composition,[m
+[32m+[m[32mand the manager’s transfer/budget constraints.[m
+[32m+[m
+ Based on form, price, and upcoming fixture difficulty, recommend whether the[m
+ manager should make a transfer this gameweek. If yes, say exactly who to[m
+ transfer OUT and who to bring IN, and explain why in 2-3 sentences using the[m
+[1mdiff --git a/backend/app.py b/backend/app.py[m
+[1mindex 274de37..24f45e7 100644[m
+[1m--- a/backend/app.py[m
+[1m+++ b/backend/app.py[m
+[36m@@ -50,6 +50,10 @@[m [mclass AddPlayerRequest(BaseModel):[m
+     name: str[m
+ [m
+ [m
+[32m+[m[32mclass SetSquadModeRequest(BaseModel):[m
+[32m+[m[32m    mode: str[m
+[32m+[m
+[32m+[m
+ class TransferAdviceRequest(BaseModel):[m
+     position: str[m
+     max_price: float[m
+[36m@@ -107,7 +111,14 @@[m [mdef login(req: LoginRequest):[m
+ def squad_view(authorization: str = Header(default="")):[m
+     user_id = get_current_user_id(authorization)[m
+     squad = db.load_squad_for_user(user_id)[m
+[32m+[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        squad.refresh_stats_from(client.get_all_players())[m
+[32m+[m[32m    except FPLAPIError:[m
+[32m+[m[32m        pass  # show stored stats rather than failing the whole page[m
+[32m+[m
+     return {[m
+[32m+[m[32m        "mode": squad.mode,[m
+         "players": [p.__dict__ for p in squad.players],[m
+         "total_value": squad.total_value(),[m
+         "remaining_budget": squad.remaining_budget(),[m
+[36m@@ -115,6 +126,28 @@[m [mdef squad_view(authorization: str = Header(default="")):[m
+     }[m
+ [m
+ [m
+[32m+[m[32m@app.get("/api/squad/lineup")[m
+[32m+[m[32mdef squad_lineup(authorization: str = Header(default="")):[m
+[32m+[m[32m    user_id = get_current_user_id(authorization)[m
+[32m+[m[32m    squad = db.load_squad_for_user(user_id)[m
+[32m+[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        squad.refresh_stats_from(client.get_all_players())[m
+[32m+[m[32m    except FPLAPIError:[m
+[32m+[m[32m        pass  # fall back to stored stats rather than failing the whole lineup[m
+[32m+[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        lineup = squad.select_starting_xi()[m
+[32m+[m[32m    except InvalidSquadError as e:[m
+[32m+[m[32m        raise HTTPException(status_code=400, detail=str(e))[m
+[32m+[m
+[32m+[m[32m    return {[m
+[32m+[m[32m        "formation": lineup["formation"],[m
+[32m+[m[32m        "starters": [p.__dict__ for p in lineup["starters"]],[m
+[32m+[m[32m        "bench": [p.__dict__ for p in lineup["bench"]],[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m
+ @app.post("/api/squad/players")[m
+ def add_player(req: AddPlayerRequest, authorization: str = Header(default="")):[m
+     user_id = get_current_user_id(authorization)[m
+[36m@@ -150,6 +183,17 @@[m [mdef remove_player(fpl_id: int, authorization: str = Header(default="")):[m
+     return {"removed": removed.__dict__}[m
+ [m
+ [m
+[32m+[m[32m@app.post("/api/squad/mode")[m
+[32m+[m[32mdef set_squad_mode(req: SetSquadModeRequest, authorization: str = Header(default="")):[m
+[32m+[m[32m    user_id = get_current_user_id(authorization)[m
+[32m+[m[32m    if req.mode not in ("BUILDING", "CURRENT"):[m
+[32m+[m[32m        raise HTTPException(status_code=400, detail="Mode must be 'BUILDING' or 'CURRENT'")[m
+[32m+[m[32m    squad = db.load_squad_for_user(user_id)[m
+[32m+[m[32m    squad.mode = req.mode[m
+[32m+[m[32m    db.save_squad_for_user(user_id, squad)[m
+[32m+[m[32m    return {"mode": squad.mode}[m
+[32m+[m
+[32m+[m
+ # ---------- player search ----------[m
+ [m
+ @app.get("/api/players/search")[m
+[36m@@ -186,10 +230,17 @@[m [mdef transfer_advice(req: TransferAdviceRequest, authorization: str = Header(defa[m
+     try:[m
+         all_players = client.get_all_players()[m
+         gw = client.get_next_gameweek()[m
+[31m-        fixtures = client.get_fixtures(gameweek=gw)[m
+[32m+[m[32m        # Gather fixtures for the next three gameweeks (gw, gw+1, gw+2)[m
+[32m+[m[32m        all_fixtures = [][m
+[32m+[m[32m        for offset in range(3):[m
+[32m+[m[32m            gw_n = gw + offset[m
+[32m+[m[32m            all_fixtures.extend(client.get_fixtures(gameweek=gw_n))[m
+[32m+[m[32m        fixtures = all_fixtures[m
+     except FPLAPIError as e:[m
+         raise HTTPException(status_code=502, detail=f"FPL API error: {e}")[m
+ [m
+[32m+[m[32m    squad.refresh_stats_from(all_players)  # so advice is based on current form, not a stale snapshot[m
+[32m+[m
+     squad_ids = {p.fpl_id for p in squad.players}[m
+     candidates = sorted([m
+         [p for p in all_players[m
+[36m@@ -223,11 +274,14 @@[m [mdef captain_advice(authorization: str = Header(default="")):[m
+         raise HTTPException(status_code=400, detail="Squad is empty")[m
+ [m
+     try:[m
+[32m+[m[32m        all_players = client.get_all_players()[m
+         gw = client.get_next_gameweek()[m
+         fixtures = client.get_fixtures(gameweek=gw)[m
+     except FPLAPIError as e:[m
+         raise HTTPException(status_code=502, detail=f"FPL API error: {e}")[m
+ [m
+[32m+[m[32m    squad.refresh_stats_from(all_players)  # so advice is based on current form, not a stale snapshot[m
+[32m+[m
+     try:[m
+         advice = advisor.get_captain_advice(squad, fixtures)[m
+     except AIRateLimitError as e:[m
+[1mdiff --git a/backend/fpl_advisor.db b/backend/fpl_advisor.db[m
+[1mindex d9034f9..799ae67 100644[m
+Binary files a/backend/fpl_advisor.db and b/backend/fpl_advisor.db differ
+[1mdiff --git a/backend/fpl_api.py b/backend/fpl_api.py[m
+[1mindex 5bcfb0a..696c60b 100644[m
+[1m--- a/backend/fpl_api.py[m
+[1m+++ b/backend/fpl_api.py[m
+[36m@@ -26,6 +26,15 @@[m [mclass FPLAPIError(Exception):[m
+     pass[m
+ [m
+ [m
+[32m+[m[32mUSER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"[m
+[32m+[m[32mMAX_RETRIES = 2[m
+[32m+[m[32mRETRY_BACKOFF_SECONDS = 1.0[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef _is_transient_status(status_code: int) -> bool:[m
+[32m+[m[32m    return 500 <= status_code < 600[m
+[32m+[m
+[32m+[m
+ class FPLClient:[m
+     def __init__(self, cache_ttl_seconds: int = 300):[m
+         self._cache: dict = {}[m
+[36m@@ -33,16 +42,37 @@[m [mclass FPLClient:[m
+         self.cache_ttl = cache_ttl_seconds[m
+ [m
+     def _get(self, endpoint: str) -> dict:[m
+[31m-        """Fetch a JSON endpoint, with simple time-based caching."""[m
+[32m+[m[32m        """Fetch a JSON endpoint, with simple time-based caching and retries."""[m
+         now = time.time()[m
+         if endpoint in self._cache and (now - self._cache_time[endpoint]) < self.cache_ttl:[m
+             return self._cache[endpoint][m
+ [m
+[31m-        try:[m
+[31m-            response = requests.get(f"{BASE_URL}/{endpoint}", timeout=10)[m
+[31m-            response.raise_for_status()[m
+[31m-        except requests.exceptions.RequestException as e:[m
+[31m-            raise FPLAPIError(f"Failed to fetch {endpoint}: {e}") from e[m
+[32m+[m[32m        last_error = None[m
+[32m+[m[32m        for attempt in range(MAX_RETRIES + 1):[m
+[32m+[m[32m            try:[m
+[32m+[m[32m                response = requests.get([m
+[32m+[m[32m                    f"{BASE_URL}/{endpoint}",[m
+[32m+[m[32m                    headers={"User-Agent": USER_AGENT},[m
+[32m+[m[32m                    timeout=10,[m
+[32m+[m[32m                )[m
+[32m+[m[32m            except requests.exceptions.RequestException as e:[m
+[32m+[m[32m                last_error = e[m
+[32m+[m[32m                if attempt < MAX_RETRIES:[m
+[32m+[m[32m                    time.sleep(RETRY_BACKOFF_SECONDS)[m
+[32m+[m[32m                    continue[m
+[32m+[m[32m                raise FPLAPIError(f"Failed to fetch {endpoint} after {attempt + 1} attempts: {e}") from e[m
+[32m+[m
+[32m+[m[32m            if response.ok:[m
+[32m+[m[32m                break[m
+[32m+[m
+[32m+[m[32m            last_error = FPLAPIError(f"Unexpected status {response.status_code} from {endpoint}")[m
+[32m+[m[32m            if attempt < MAX_RETRIES and _is_transient_status(response.status_code):[m
+[32m+[m[32m                time.sleep(RETRY_BACKOFF_SECONDS)[m
+[32m+[m[32m                continue[m
+[32m+[m[32m            raise last_error[m
+[32m+[m
+[32m+[m[32m        if last_error is not None and not response.ok:[m
+[32m+[m[32m            raise last_error[m
+ [m
+         data = response.json()[m
+         self._cache[endpoint] = data[m
+[1mdiff --git a/backend/main.py b/backend/main.py[m
+[1mindex d613753..f11bd97 100644[m
+[1m--- a/backend/main.py[m
+[1m+++ b/backend/main.py[m
+[36m@@ -141,6 +141,17 @@[m [mdef captain_advice_flow(squad: Squad, client: FPLClient, advisor: AIAdvisor) ->[m
+ def main() -> None:[m
+     print("Loading squad...")[m
+     squad = load_squad()[m
+[32m+[m[41m    [m
+[32m+[m[32m    # Show mode selection if new squad or user hasn't chosen[m
+[32m+[m[32m    if not squad.players:[m
+[32m+[m[32m        print("\nAre you building a new squad or entering your current squad?")[m
+[32m+[m[32m        print("1. Build a new squad")[m
+[32m+[m[32m        print("2. Enter my current squad")[m
+[32m+[m[32m        choice = input("Choose (1/2): ").strip()[m
+[32m+[m[32m        if choice == "2":[m
+[32m+[m[32m            squad.mode = "CURRENT"[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            squad.mode = "BUILDING"[m[41m [m
+     client = FPLClient()[m
+ [m
+     # AI advisor needs an API key; don't crash the whole app if it's missing —[m
+[1mdiff --git a/backend/models.py b/backend/models.py[m
+[1mindex 5b9293e..ee0d987 100644[m
+[1m--- a/backend/models.py[m
+[1m+++ b/backend/models.py[m
+[36m@@ -75,8 +75,9 @@[m [mclass Squad:[m
+     REQUIRED_COUNTS = {"GK": 2, "DEF": 5, "MID": 5, "FWD": 3}[m
+     MAX_PER_CLUB = 3[m
+ [m
+[31m-    def __init__(self, budget: float = 100.0):[m
+[32m+[m[32m    def __init__(self, budget: float = 100.0, mode: str = "BUILDING"):[m
+         self.budget = budget[m
+[32m+[m[32m        self.mode = mode[m
+         self.players: list[Player] = [][m
+ [m
+     def add_player(self, player: Player) -> None:[m
+[36m@@ -94,7 +95,7 @@[m [mclass Squad:[m
+         if club_count >= self.MAX_PER_CLUB:[m
+             raise InvalidSquadError(f"Squad already has {self.MAX_PER_CLUB} players from {player.team}.")[m
+ [m
+[31m-        if self.total_value() + player.price > self.budget:[m
+[32m+[m[32m        if self.mode == "BUILDING" and self.total_value() + player.price > self.budget:[m
+             raise InvalidSquadError([m
+                 f"Adding {player.name} (£{player.price}m) would exceed the "[m
+                 f"£{self.budget}m budget."[m
+[36m@@ -128,12 +129,124 @@[m [mclass Squad:[m
+     def to_dict(self) -> dict:[m
+         return {[m
+             "budget": self.budget,[m
+[32m+[m[32m            "mode": self.mode,[m
+             "players": [p.__dict__ for p in self.players],[m
+         }[m
+ [m
+     @classmethod[m
+     def from_dict(cls, data: dict) -> "Squad":[m
+[31m-        squad = cls(budget=data.get("budget", 100.0))[m
+[32m+[m[32m        squad = cls(budget=data.get("budget", 100.0), mode=data.get("mode", "BUILDING"))[m
+         for p in data.get("players", []):[m
+             squad.players.append(Player(**p))[m
+         return squad[m
+[32m+[m
+[32m+[m[32m    def refresh_stats_from(self, live_players: list["Player"]) -> None:[m
+[32m+[m[32m        """[m
+[32m+[m[32m        Update this squad's players with current form, total_points, and[m
+[32m+[m[32m        ownership_percent from freshly-fetched live data (matched by[m
+[32m+[m[32m        fpl_id), in place.[m
+[32m+[m
+[32m+[m[32m        Nee
