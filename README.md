@@ -59,5 +59,5 @@ pytest test_models.py -v
 
 ## FPL squad rules encoded in `Squad`
 - 15 players: 2 GK, 5 DEF, 5 MID, 3 FWD
-- Max 3 players from any one club
+- Max 3 players from any club
 - Total price must not exceed budget (default £100.0m)
